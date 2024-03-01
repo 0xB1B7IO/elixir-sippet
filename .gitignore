@@ -29,4 +29,4 @@ erl_crash.dump
 # C/C++ NIF modules
 *.o
 
-./lib/demo.ex
+.elixir_ls
