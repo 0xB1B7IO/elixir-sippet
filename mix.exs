@@ -32,7 +32,7 @@ defmodule Sippet.Mixfile do
 
   def application do
     [
-      extra_applications: [:logger, :crypto]
+      extra_applications: [:logger, :crypto, :runtime_tools, :wx, :observer]
     ]
   end
 
@@ -40,6 +40,9 @@ defmodule Sippet.Mixfile do
     [
       {:sippet_uri, "~> 0.1"},
       {:gen_state_machine, ">= 3.0.0"},
+      {:thousand_island, "~> 1.3.2"},
+      {:bandit, "~> 1.2.1"},
+      {:websock_adapter, "~> 0.5.3"},
 
       # Build the NIF
       {:elixir_make, "~> 0.7", runtime: false},

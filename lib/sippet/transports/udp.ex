@@ -4,15 +4,11 @@ defmodule Sippet.Transports.UDP do
 
   The UDP transport consists basically in a single listening and sending
   process, this implementation itself.
-
-  This process creates an UDP socket and keeps listening for datagrams in
-  active mode. Its job is to forward the datagrams to the processing receiver
-  defined in `Sippet.Transports.Receiver`.
   """
 
   use GenServer
 
-  alias Sippet.Message
+  alias Sippet.{Message, Transports.Utils}
 
   require Logger
 
@@ -67,7 +63,7 @@ defmodule Sippet.Transports.UDP do
       end
 
     ip =
-      case resolve_name(address, family) do
+      case Utils.resolve_name(address, family) do
         {:ok, ip} ->
           ip
 
@@ -92,7 +88,7 @@ defmodule Sippet.Transports.UDP do
       {:ok, socket} ->
         Logger.debug(
           "#{inspect(self())} started transport " <>
-            "#{stringify_sockname(socket)}/udp"
+            "#{Utils.stringify_sockname(socket)}/udp"
         )
 
         state = %__MODULE__{
@@ -129,11 +125,11 @@ defmodule Sippet.Transports.UDP do
         %{socket: socket, family: family, sippet: sippet} = state
       ) do
     Logger.debug([
-      "sending message to #{stringify_hostport(to_host, to_port)}/udp",
+      "sending message to #{Utils.stringify_hostport(to_host, to_port)}/udp",
       ", #{inspect(key)}"
     ])
 
-    with {:ok, to_ip} <- resolve_name(to_host, family),
+    with {:ok, to_ip} <- Utils.resolve_name(to_host, family),
          iodata <- Message.to_iodata(message),
          :ok <- :gen_udp.send(socket, {to_ip, to_port}, iodata) do
       :ok
@@ -152,30 +148,10 @@ defmodule Sippet.Transports.UDP do
   @impl true
   def terminate(reason, %{socket: socket}) do
     Logger.debug(
-      "stopped transport #{stringify_sockname(socket)}/udp, reason: #{inspect(reason)}"
+      "stopped transport #{Utils.stringify_sockname(socket)}/udp, reason: #{inspect(reason)}"
     )
 
     :gen_udp.close(socket)
   end
 
-  defp resolve_name(host, family) do
-    host
-    |> String.to_charlist()
-    |> :inet.getaddr(family)
-  end
-
-  defp stringify_sockname(socket) do
-    {:ok, {ip, port}} = :inet.sockname(socket)
-
-    address =
-      ip
-      |> :inet_parse.ntoa()
-      |> to_string()
-
-    "#{address}:#{port}"
-  end
-
-  defp stringify_hostport(host, port) do
-    "#{host}:#{port}"
-  end
 end
