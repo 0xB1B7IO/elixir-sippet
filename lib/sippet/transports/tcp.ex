@@ -14,7 +14,7 @@ defmodule Sippet.Transports.TCP do
     Message.StatusLine,
     Transports,
     Transports.Utils,
-    Transports.DialogCache
+    Transports.SessionCache
   }
 
 
@@ -46,7 +46,7 @@ defmodule Sippet.Transports.TCP do
     port_range = Keyword.get(options, :port_range, 10_000..20_000)
     handler_module = Keyword.get(options, :handler_module, Transports.TCP.Server)
 
-    dialog_cache = Sippet.Transports.DialogCache.init(options[:sippet])
+    session_cache = Sippet.Transports.SessionCache.init(options[:sippet])
 
     {transport_module, transport_options} =
       case scheme do
@@ -61,7 +61,7 @@ defmodule Sippet.Transports.TCP do
 
     handler_options = [
       sippet: sippet,
-      dialog_cache: dialog_cache,
+      session_cache: session_cache,
       ephemeral: true
     ]
 
@@ -75,7 +75,7 @@ defmodule Sippet.Transports.TCP do
 
     client_options = [
       sippet: sippet,
-      dialog_cache: dialog_cache,
+      session_cache: session_cache,
       port_range: port_range,
     ]
 
@@ -85,7 +85,7 @@ defmodule Sippet.Transports.TCP do
       ip: ip,
       port: port,
       family: family,
-      dialog_cache: dialog_cache,
+      session_cache: session_cache,
       client_options: client_options,
       thousand_island_options: thousand_island_options
     ]
@@ -130,7 +130,7 @@ defmodule Sippet.Transports.TCP do
         state
       ) do
     with {:ok, peer_ip} <- Utils.resolve_name(host, state[:family]) do
-      case DialogCache.lookup(state[:dialog_cache], peer_ip, port) do
+      case SessionCache.lookup(state[:session_cache], peer_ip, port) do
         [{_key, handler}] ->
           # found handler, relay message
           send(handler, {:send_message, response})
@@ -151,7 +151,7 @@ defmodule Sippet.Transports.TCP do
         state
       ) do
     with {:ok, peer_ip} <- Utils.resolve_name(host, state[:family]) do
-      case DialogCache.lookup(state[:connections], peer_ip, port) do
+      case SessionCache.lookup(state[:connections], peer_ip, port) do
         [{_key, handler}] ->
           send(handler, {:send_message, request})
           {:reply, :ok, state}
@@ -167,7 +167,7 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def terminate(reason, state) do
-    DialogCache.teardown(state[:dialog_cache])
+    SessionCache.teardown(state[:session_cache])
 
     Process.exit(self(), reason)
   end

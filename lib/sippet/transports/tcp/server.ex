@@ -2,7 +2,7 @@ defmodule Sippet.Transports.TCP.Server do
   use ThousandIsland.Handler
 
   alias ThousandIsland.{Socket}
-  alias Sippet.{Message, Transports.DialogCache}
+  alias Sippet.{Message, Transports.SessionCache}
 
   require Logger
 
@@ -14,7 +14,7 @@ defmodule Sippet.Transports.TCP.Server do
     else
       {:ok, {host, port} = peer} = Socket.peername(socket)
 
-        DialogCache.handle_connection(state[:dialog_cache], host, port, self())
+        SessionCache.handle_connection(state[:session_cache], host, port, self())
 
         state =
           state
@@ -75,7 +75,7 @@ defmodule Sippet.Transports.TCP.Server do
   def handle_close(_socket, state) do
     {address, port} = state[:peer]
 
-    DialogCache.handle_disconnection(state[:dialog_cache], address, port)
+    SessionCache.handle_disconnection(state[:session_cache], address, port)
 
     Logger.info("Peer Disconnection: #{inspect(state[:peer])}")
 

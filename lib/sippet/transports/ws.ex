@@ -1,6 +1,12 @@
 defmodule Sippet.Transports.WS do
-  alias Sippet.Transports.{Utils, DialogCache}
-  alias Sippet.{Message, Message.RequestLine, Message.StatusLine}
+
+  alias Sippet.{
+    Message,
+    Message.RequestLine,
+    Message.StatusLine,
+    Transports.Utils,
+    Transports.SessionCache
+  }
 
   @moduledoc """
     This Module implements an RFC7118 transport Sippet using Bandit and
@@ -95,7 +101,7 @@ defmodule Sippet.Transports.WS do
 
     socket_addr = "#{scheme}://#{address}:#{port}"
 
-    dialog_cache = DialogCache.init(options[:name])
+    session_cache = SessionCache.init(options[:name])
 
     plug =
       Keyword.get(options, :plug,
@@ -104,7 +110,7 @@ defmodule Sippet.Transports.WS do
         [
           sippet: options[:name],
           scheme: scheme,
-          dialog_cache: dialog_cache]
+          session_cache: session_cache]
       })
 
     client_options = [
@@ -112,7 +118,7 @@ defmodule Sippet.Transports.WS do
         scheme: scheme,
         ip: ip,
         port_range: Keyword.get(options, :port_range, 0),
-        dialog_cache: dialog_cache
+        session_cache: session_cache
       ]
 
     bandit_options =[
@@ -131,7 +137,7 @@ defmodule Sippet.Transports.WS do
         port: port,
         family: family,
         socket_addr: socket_addr,
-        dialog_cache: dialog_cache,
+        session_cache: session_cache,
         bandit_options: bandit_options,
         client_options: client_options
       ]
@@ -176,9 +182,9 @@ defmodule Sippet.Transports.WS do
         _from,
         state
       ) do
-      call_id = Message.get_header(response, :call_id)
-    case DialogCache.lookup(state[:dialog_cache], call_id) do
-      [{_call_id, handler}] ->
+        instance_id = Utils.get_instance_id(response)
+    case SessionCache.lookup(state[:session_cache], instance_id) do
+      [{_instance_id, handler}] ->
         send(handler, {:send_message, response})
 
         {:reply, :ok, state}
@@ -196,7 +202,7 @@ defmodule Sippet.Transports.WS do
         state
       ) do
     with {:ok, peer_ip} <- Utils.resolve_name(peer_host, state[:family]) do
-      case DialogCache.lookup(state[:dialog_cache], peer_ip, peer_port) do
+      case SessionCache.lookup(state[:session_cache], peer_ip, peer_port) do
         [{_call_id, handler}] ->
           send(handler, {:send_message, request})
           {:reply, :ok, state}
@@ -215,6 +221,5 @@ defmodule Sippet.Transports.WS do
 
     :ok
   end
-
 
 end

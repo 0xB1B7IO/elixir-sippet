@@ -1,12 +1,13 @@
 defmodule Sippet.Transports.WS.Server do
   require Logger
 
-  alias Sippet.{Transports.DialogCache}
-  alias Sippet.{Message}
+  alias Sippet.{Router,Message}
+  alias Sippet.Transports.{SessionCache, Utils}
+  @moduledoc """
+  a WIP websockets server side handler for sippet
+  """
 
   def init(state) do
-    ## TODO: set timeout on inbound data
-
     {:ok, state}
   end
 
@@ -14,26 +15,29 @@ defmodule Sippet.Transports.WS.Server do
   def handle_in({@keepalive, _}, state), do: {:noreply, state}
   @exit_code <<255, 244, 255, 253, 6>>
   def handle_in({@exit_code, _}, state), do: {:close, state}
+  #TODO: handle tls cases
 
   def handle_in({data, [opcode: _any]}, state) do
+
     peer = state[:peer]
 
-    with {:ok, msg} <- Sippet.Message.parse(data) do
-      call_id = Message.get_header(msg, :call_id)
+    with {:ok, msg} <- Message.parse(data),
+      {:ok, instance_id} <- Utils.get_instance_id(msg) do
 
-      DialogCache.handle_connection(state[:dialog_cache], call_id, self())
+      SessionCache.handle_connection(state[:session_cache], instance_id, self())
 
-      Sippet.Router.handle_transport_message(state[:sippet], data, {state[:scheme], peer.address, peer.port})
+      Router.handle_transport_message(state[:sippet], data, {state[:scheme], peer.address, peer.port})
+
     else
-      err ->
-        Logger.warning(inspect(err))
-    end
+      error ->
+        Logger.warning("could not parse data in websocket handler #{inspect(error)}")
 
-    {:ok, state}
+        {:close, state}
+    end
   end
 
-  def handle_info({:send_message, msg}, state) do
-    io_msg = Sippet.Message.to_iodata(msg)
+  def handle_info({:send_message, msg = %Message{}}, state) do
+    io_msg = Message.to_iodata(msg)
 
     {:push, {:text, io_msg}, state}
   end

@@ -1,7 +1,7 @@
-defmodule Sippet.Transports.DialogCache do
+defmodule Sippet.Transports.SessionCache do
 
   @moduledoc """
-    a cache for sippet socket handlers to announce and reserve session details
+    a simple session handler cache
   """
 
   def init(name),
@@ -32,4 +32,5 @@ defmodule Sippet.Transports.DialogCache do
     do: :ets.lookup(table, key(host, port))
 
   def teardown(table), do: :ets.delete(table)
+
 end
