@@ -397,6 +397,14 @@ defmodule Sippet.Message do
       |> put_header(:cseq, get_header(request, :cseq))
 
     response =
+      case get_header(request, :via) do
+        [{_version, protocol, _, _branch}] when protocol in [:ws, :wss] ->
+          put_header(response, :contact, get_header(request, :contact))
+        _ ->
+          response
+      end
+
+    response =
       if status_line.status_code > 100 and
            not Map.has_key?(elem(response.headers.to, 2), "tag") do
         {display_name, uri, params} = response.headers.to
