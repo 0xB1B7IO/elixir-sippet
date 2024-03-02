@@ -18,7 +18,6 @@ defmodule Sippet.Transports.WS.Server do
   #TODO: handle tls cases
 
   def handle_in({data, [opcode: _any]}, state) do
-
     peer = state[:peer]
 
     with {:ok, msg} <- Message.parse(data),
@@ -28,6 +27,7 @@ defmodule Sippet.Transports.WS.Server do
 
       Router.handle_transport_message(state[:sippet], data, {state[:scheme], peer.address, peer.port})
 
+      {:ok, state}
     else
       error ->
         Logger.warning("could not parse data in websocket handler #{inspect(error)}")

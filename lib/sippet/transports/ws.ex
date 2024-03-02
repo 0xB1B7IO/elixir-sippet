@@ -2,17 +2,14 @@ defmodule Sippet.Transports.WS do
 
   alias Sippet.{
     Message,
-    Message.RequestLine,
-    Message.StatusLine,
     Transports.Utils,
     Transports.SessionCache
   }
 
   @moduledoc """
-    This Module implements an RFC7118 transport Sippet using Bandit and
-    WebsockAdapter Bandit as a configurable HTTP/WS server.
+    This Module implements an RFC7118 transport using Bandit,
+    Plug, and WebsockAdapter as a configurable HTTP/WS server.
     _______________________________________
-
     Alice    (SIP WSS)    proxy.example.com
     |                            |
     | HTTP GET (WS handshake) F1 |
@@ -59,10 +56,10 @@ defmodule Sippet.Transports.WS do
   require Logger
 
   def start_link(options) do
-    name = # name for sippet stack
+    sippet = # name for sippet stack
       Keyword.get(options, :name, nil)
       |> case do
-          name when is_atom(name) -> name
+          sippet when is_atom(sippet) -> sippet
           nil -> raise ArgumentError, "must provide a sippet name"
           _ -> raise ArgumentError, "sippet names must be atoms"
         end
@@ -99,22 +96,19 @@ defmodule Sippet.Transports.WS do
 
     port = Keyword.get(options, :port, 80)
 
-    socket_addr = "#{scheme}://#{address}:#{port}"
-
-    session_cache = SessionCache.init(options[:name])
+    session_cache = SessionCache.init(sippet)
 
     plug =
-      Keyword.get(options, :plug,
-      {
+      Keyword.get(options, :plug, {
         Sippet.Transports.WS.Plug,
         [
-          sippet: options[:name],
+          sippet: sippet,
           scheme: scheme,
           session_cache: session_cache]
       })
 
     client_options = [
-        sippet: name,
+        sippet: sippet,
         scheme: scheme,
         ip: ip,
         port_range: Keyword.get(options, :port_range, 0),
@@ -130,13 +124,13 @@ defmodule Sippet.Transports.WS do
 
     options =
       [
-        sippet: name,
+        name: "#{scheme}://#{sippet}@#{address}:#{port}",
+        sippet: sippet,
         scheme: scheme,
         ip: ip,
         address: address,
         port: port,
         family: family,
-        socket_addr: socket_addr,
         session_cache: session_cache,
         bandit_options: bandit_options,
         client_options: client_options
@@ -156,18 +150,12 @@ defmodule Sippet.Transports.WS do
   def handle_continue(state, nil) do
     case Bandit.start_link(state[:bandit_options]) do
       {:ok, _pid} ->
-        Logger.info(
-          "Running sippet #{state[:sippet]} on " <>
-          "#{state[:scheme]}://#{state[:address]}:#{state[:port]}"
-        )
+        Logger.debug("starting: "<>state[:name])
 
         {:noreply, state}
       _ = reason ->
 
-        Logger.error(
-          "#{state[:scheme]}://#{state[:ip]}:#{state[:port]}" <>
-            "#{inspect(reason)}, retrying in 10s..."
-        )
+        Logger.error(state[:name], "#{inspect(reason)}, retrying in 10s...")
 
         Process.sleep(10_000)
 
@@ -177,43 +165,31 @@ defmodule Sippet.Transports.WS do
 
   @impl true
   def handle_call(
-        {:send_message, %Message{start_line: %StatusLine{}} = response,
-         _peer_host, _peer_port, _key},
-        _from,
-        state
+        {:send_message, %Message{} = msg, _, _, key}, _, state
       ) do
-        instance_id = Utils.get_instance_id(response)
-    case SessionCache.lookup(state[:session_cache], instance_id) do
-      [{_instance_id, handler}] ->
-        send(handler, {:send_message, response})
+    with {:ok, instance_id} <- Utils.get_instance_id(msg) do
+      case SessionCache.lookup(state[:session_cache], instance_id) do
+        [{_instance_id, handler}] ->
+          # found handler, relay message
+          send(handler, {:send_message, msg})
+        [] ->
+          # add config option for upstream requests
+          Logger.warning("no #{state[:scheme]} handler for #{instance_id}")
 
-        {:reply, :ok, state}
+          if key != nil do
+            Sippet.Router.receive_transport_error(state[:sippet], key, :no_handler)
+          end
+      end
 
-      [] ->
-        {:reply, {:error, :no_handler}, state}
     end
+    {:reply, :ok, state}
   end
 
   @impl true
-  def handle_call(
-        {:send_message, %Message{start_line: %RequestLine{}} = request,
-        peer_host, peer_port, _key},
-        _from,
-        state
-      ) do
-    with {:ok, peer_ip} <- Utils.resolve_name(peer_host, state[:family]) do
-      case SessionCache.lookup(state[:session_cache], peer_ip, peer_port) do
-        [{_call_id, handler}] ->
-          send(handler, {:send_message, request})
-          {:reply, :ok, state}
-        [] ->
-          # TODO: connect to remote WS server)
-          {:reply, {:error, :no_handler}, state}
-      end
-    else
-      {:error, reason} ->
-        Logger.warning("Socket error: #{state[:scheme]}://#{state[:ip]}:#{state[:port]} #{inspect(reason)}")
-    end
+  def terminate(reason, state) do
+    SessionCache.teardown(state[:session_cache])
+
+    Process.exit(self(), reason)
   end
 
   def close(pid) do

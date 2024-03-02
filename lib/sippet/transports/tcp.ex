@@ -1,8 +1,6 @@
 defmodule Sippet.Transports.TCP do
   @moduledoc """
-  Implements a TCP transport via ThousandIsland
-  Connections will persist unless you override the handlers yourself.
-  Connections are also reused for subsequent requests sent to and from the client.
+    Implements a TCP transport server via ThousandIsland
   """
 
   require Logger
@@ -10,13 +8,10 @@ defmodule Sippet.Transports.TCP do
 
   alias Sippet.{
     Message,
-    Message.RequestLine,
-    Message.StatusLine,
     Transports,
     Transports.Utils,
     Transports.SessionCache
   }
-
 
   @spec start_link(keyword()) :: :ignore | {:error, any()} | {:ok, pid()}
   def start_link(options) do
@@ -32,16 +27,36 @@ defmodule Sippet.Transports.TCP do
           raise ArgumentError, "expected :sippet option to be present"
       end
 
-    scheme = Keyword.get(options, :scheme, :sip)
-    family = Keyword.get(options, :family, :inet)
-    ip =
-      Keyword.get(options, :ip, {0,0,0,0})
+    {address, family} =
+      Keyword.get(options, :address, {"0.0.0.0", :inet})
       |> case do
-        ip when is_tuple(ip) ->
-          ip
-        ip when is_binary(ip) ->
-          Utils.resolve_name(ip, family)
+        {address, family} when family in [:inet, :inet6] and is_binary(address) ->
+          {address, family}
+
+        {address, :inet} when is_binary(address) ->
+          {address, :inet}
+
+        other ->
+          raise ArgumentError,
+                "expected :address to be an address or {address, family} tuple, got: " <>
+                  "#{inspect(other)}"
         end
+
+    scheme =
+      Keyword.get(options, :scheme, :tcp)
+      |> case do
+          :tcp -> :tcp
+          :tls -> :tls
+          _ -> raise ArgumentError, "#{inspect(__MODULE__)} only supports :tcp and :tls schemes"
+        end
+
+    ip =
+      case Utils.resolve_name(address, family) do
+        {:ok, ip} -> ip
+        {:error, reason} ->
+          raise ArgumentError, ":address contains invalid IP or DNS name: #{inspect(reason)}"
+      end
+
     port = Keyword.get(options, :port, 5060)
     port_range = Keyword.get(options, :port_range, 10_000..20_000)
     handler_module = Keyword.get(options, :handler_module, Transports.TCP.Server)
@@ -50,9 +65,9 @@ defmodule Sippet.Transports.TCP do
 
     {transport_module, transport_options} =
       case scheme do
-        :sips ->
+        :tls ->
           raise "unimplemented"
-        :sip ->
+        :tcp ->
           transport_options =
           Keyword.take(options, [:ip])
           |> then(&(Keyword.get(options, :transport_options, []) ++ &1))
@@ -80,6 +95,7 @@ defmodule Sippet.Transports.TCP do
     ]
 
     options = [
+      name: "#{scheme}://#{sippet}@#{address}:#{port}",
       sippet: sippet,
       scheme: scheme,
       ip: ip,
@@ -107,13 +123,13 @@ defmodule Sippet.Transports.TCP do
   def handle_continue(state, nil) do
     case ThousandIsland.start_link(state[:thousand_island_options]) do
       {:ok, pid} ->
-        Logger.debug("started TCP transport: #{inspect(self())}")
+        Logger.debug("started TCP transport: #{state[:name]}")
+
         {:noreply, Keyword.put_new(state, :socket, pid)}
 
       {:error, reason} ->
-        Logger.error(
-          "tcp://#{state[:address]}:#{state[:port]} " <>
-            "#{inspect(reason)}, retrying in 10s..."
+        Logger.error(state[:name] <>
+          "#{inspect(reason)}, retrying in 10s..."
         )
 
         Process.sleep(10_000)
@@ -124,45 +140,28 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def handle_call(
-        {:send_message, %Message{start_line: %StatusLine{}} = response,
-         host, port, _key},
+        {:send_message, %Message{} = message,
+         peer_host, peer_port, key},
         _from,
         state
       ) do
-    with {:ok, peer_ip} <- Utils.resolve_name(host, state[:family]) do
-      case SessionCache.lookup(state[:session_cache], peer_ip, port) do
-        [{_key, handler}] ->
+    with {:ok, peer_ip} <- Utils.resolve_name(peer_host, state[:family]) do
+      case SessionCache.lookup(state[:session_cache], peer_ip, peer_port) do
+        [{_id, handler}] ->
           # found handler, relay message
-          send(handler, {:send_message, response})
-          # reply :ok to the caller
-          {:reply, :ok, state}
+          send(handler, {:send_message, message})
 
         [] ->
-          {:reply, {:error, :no_handler}, state}
-      end
-    end
-  end
+          Logger.warning("no #{state[:scheme]} handler for #{peer_ip}:#{peer_port}")
 
-  @impl true
-  def handle_call(
-        {:send_message, %Message{start_line: %RequestLine{}} = request,
-        host, port, _key},
-        _from,
-        state
-      ) do
-    with {:ok, peer_ip} <- Utils.resolve_name(host, state[:family]) do
-      case SessionCache.lookup(state[:connections], peer_ip, port) do
-        [{_key, handler}] ->
-          send(handler, {:send_message, request})
-          {:reply, :ok, state}
-
-        [] ->
-          :ok # TODO: connect to remote TCP server
+          if key != nil do
+            Sippet.Router.receive_transport_error(state[:sippet], key, :no_handler)
+          end
       end
-    else
-      {:error, reason} ->
-        Logger.warning("Socket error:  tcp://#{state[:address]}:#{state[:port]}: #{inspect(reason)}")
+
     end
+
+    {:reply, :ok, state}
   end
 
   @impl true
