@@ -2,13 +2,14 @@ defmodule Sippet.Transports.WS do
 
   alias Sippet.{
     Message,
-    Transports.Utils,
-    Transports.SessionCache
+    Transports.Utils
   }
 
   @moduledoc """
     This Module implements an RFC7118 transport using Bandit,
     Plug, and WebsockAdapter as a configurable HTTP/WS server.
+    TODO: a transport-local Dynamic Supervisor should spawn client handlers with passed config option
+
     _______________________________________
     Alice    (SIP WSS)    proxy.example.com
     |                            |
@@ -84,19 +85,24 @@ defmodule Sippet.Transports.WS do
       |> case do
           :ws -> :ws
           :wss -> :wss
-          _ -> raise ArgumentError, "#{inspect(__MODULE__)} only supports :ws and :wss schemes"
+          _ ->
+            raise  ArgumentError,
+                   "#{inspect(__MODULE__)} only supports :ws and :wss schemes"
         end
 
     ip =
       case Utils.resolve_name(address, family) do
         {:ok, ip} -> ip
         {:error, reason} ->
-          raise ArgumentError, ":address contains invalid IP or DNS name: #{inspect(reason)}"
+          raise ArgumentError,
+                ":address contains invalid IP or DNS name: #{inspect(reason)}"
       end
 
     port = Keyword.get(options, :port, 80)
 
-    session_cache = SessionCache.init(sippet)
+    name = :"#{scheme}://#{sippet}@#{address}:#{port}"
+
+    connection_cache = :ets.new(name, [:set, :public, {:write_concurrency, true}])
 
     plug =
       Keyword.get(options, :plug, {
@@ -104,16 +110,11 @@ defmodule Sippet.Transports.WS do
         [
           sippet: sippet,
           scheme: scheme,
-          session_cache: session_cache]
+          ip: ip,
+          port_range: Keyword.get(options, :port_range, 0),
+          connection_cache: connection_cache
+        ]
       })
-
-    client_options = [
-        sippet: sippet,
-        scheme: scheme,
-        ip: ip,
-        port_range: Keyword.get(options, :port_range, 0),
-        session_cache: session_cache
-      ]
 
     bandit_options =[
         scheme: Keyword.get(options, :bandit_scheme, :http),
@@ -124,16 +125,15 @@ defmodule Sippet.Transports.WS do
 
     options =
       [
-        name: "#{scheme}://#{sippet}@#{address}:#{port}",
+        name: name,
         sippet: sippet,
         scheme: scheme,
         ip: ip,
         address: address,
         port: port,
         family: family,
-        session_cache: session_cache,
-        bandit_options: bandit_options,
-        client_options: client_options
+        connection_cache: connection_cache,
+        bandit_options: bandit_options
       ]
 
     GenServer.start_link(__MODULE__, options)
@@ -150,9 +150,11 @@ defmodule Sippet.Transports.WS do
   def handle_continue(state, nil) do
     case Bandit.start_link(state[:bandit_options]) do
       {:ok, _pid} ->
-        Logger.debug("starting: "<>state[:name])
+
+        Logger.debug("starting: "<> inspect(state[:name]))
 
         {:noreply, state}
+
       _ = reason ->
 
         Logger.error(state[:name], "#{inspect(reason)}, retrying in 10s...")
@@ -167,8 +169,8 @@ defmodule Sippet.Transports.WS do
   def handle_call(
         {:send_message, %Message{} = msg, _, _, key}, _, state
       ) do
-    with {:ok, instance_id} <- Utils.get_instance_id(msg) do
-      case SessionCache.lookup(state[:session_cache], instance_id) do
+    with {:ok, instance_id} <- instance_id(msg) do
+      case :ets.lookup(state[:connection_cache], instance_id) do
         [{_instance_id, handler}] ->
           # found handler, relay message
           send(handler, {:send_message, msg})
@@ -187,15 +189,25 @@ defmodule Sippet.Transports.WS do
 
   @impl true
   def terminate(reason, state) do
-    SessionCache.teardown(state[:session_cache])
+    :ets.delete(state[:connection_cache])
 
     Process.exit(self(), reason)
   end
 
-  def close(pid) do
-    Process.exit(pid, :shutdown)
+  # rfc7118 clients must transmit this field for upstream elements to ID sessions
+  def instance_id(msg) do
+    with [{_cid, _contact_uri, instance_data}] <- Sippet.Message.get_header(msg, :contact),
+         raw_instance_id <- Map.get(instance_data, "+sip.instance") do
+      instance_id =
+        raw_instance_id
+        |> String.trim_leading("<")
+        |> String.trim_trailing(">")
 
-    :ok
+      {:ok, instance_id}
+    else
+      error ->
+        {:error, error}
+    end
   end
 
 end

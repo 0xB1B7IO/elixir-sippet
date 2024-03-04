@@ -3,19 +3,20 @@ defmodule Sippet.Transports.WS.Plug do
   require Plug
 
   ## TODO: Add configuration for requiring TLS
-  ## TODO: Test implementors using their own Plugs
 
-  def init(options) do
-    options
-  end
+  # include all options passed in by bandit
+  def init(options), do: options
 
-  def call(%{request_path: "/", method: "GET"} = conn, options),
+  # we do not care about path, more so authentication
+  def call(%{method: "GET"} = conn, options),
     do: authorize(conn, options)
 
-  def call(conn,_),
-    do: Plug.Conn.send_resp(conn, 404, "Not Found")
+  # the caller attempted to use
+  def call(conn, options),
+      do: no_impl(conn, options)
 
   def authorize(conn, options) do
+    # TODO: configurable authorization in digest, TLS, or both, in HTTP leg or SIP leg
     with _parsed_creds <- Plug.BasicAuth.parse_basic_auth(conn) do
       upgrade(conn, options)
     else
@@ -31,12 +32,18 @@ defmodule Sippet.Transports.WS.Plug do
       WebSockAdapter.upgrade(
         conn,
         Sippet.Transports.WS.Server,
-        Keyword.put(options, :peer, Plug.Conn.get_peer_data(conn)),
+        Keyword.put(
+          options, :peer, Plug.Conn.get_peer_data(conn)
+        ),
         timeout: 60_000,
         validate_utf8: true
       )
+
     else
-      Plug.Conn.send_resp(conn, 418, "I'm a teapot")
+      no_impl(conn)
     end
   end
+
+  defp no_impl(conn, _options \\ []),
+       do: Plug.Conn.send_resp(conn, 418, "I'm a teapot")
 end
