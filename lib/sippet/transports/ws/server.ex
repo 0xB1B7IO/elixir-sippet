@@ -13,8 +13,8 @@ defmodule Sippet.Transports.WS.Server do
 
   def init(state), do: {:ok, state}
 
-  @keepalive <<13, 10, 13, 10>>
-  def handle_in({@keepalive, _}, state), do: {:noreply, state}
+  @keep_alive <<13, 10, 13, 10>>
+  def handle_in({@keep_alive, _}, state), do: {:noreply, state}
   @exit_code <<255, 244, 255, 253, 6>>
   def handle_in({@exit_code, _}, state), do: {:close, state}
 
