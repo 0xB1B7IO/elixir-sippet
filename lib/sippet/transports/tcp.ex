@@ -1,8 +1,6 @@
 defmodule Sippet.Transports.TCP do
   @moduledoc """
     Implements a TCP transport server via ThousandIsland
-
-    TODO: a transport-local Dynamic Supervisor should spawn client handlers with passed config option
   """
 
   require Logger
@@ -57,13 +55,23 @@ defmodule Sippet.Transports.TCP do
           raise ArgumentError, ":address contains invalid IP or DNS name: #{inspect(reason)}"
       end
 
-    port = Keyword.get(options, :port, 5060)
+    port =
+      Keyword.get(options, :port, 5060)
 
-    name = :"#{scheme}://#{sippet}@#{address}:#{port}"
+    name =
+      :"#{scheme}://#{sippet}@#{address}:#{port}"
 
-    handler_module = Keyword.get(options, :handler_module, Sippet.Transports.TCP.Server)
+    handler_module =
+      Keyword.get(options, :handler_module, Sippet.Transports.TCP.Server)
 
-    connection_cache = :ets.new(name, [:set, :public, {:write_concurrency, true}])
+    connection_cache =
+      :ets.new(name, [
+        :named_table,
+        :set,
+        :public,
+        read_concurrency: true,
+        write_concurrency: true
+      ])
 
     handler_options = [
       sippet: sippet,
@@ -72,6 +80,7 @@ defmodule Sippet.Transports.TCP do
       connection_cache: connection_cache,
       ephemeral: true
     ]
+
     client_options = [
       sippet: sippet,
       connection_cache: connection_cache,
@@ -121,16 +130,20 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def handle_continue(state, nil) do
-    case ThousandIsland.start_link(state[:thousand_island_options]) do
-      {:ok, pid} ->
+    with {:ok, client_supervisor} <- DynamicSupervisor.start_link(strategy: :one_for_one),
+      {:ok, pid} <- ThousandIsland.start_link(state[:thousand_island_options]) do
+
+        state =
+          state
+          |> Keyword.put_new(:socket, pid)
+          |> Keyword.put(:client_supervisor, client_supervisor)
+
         Logger.debug("started TCP transport: #{state[:name]}")
 
-        {:noreply, Keyword.put_new(state, :socket, pid)}
-
-      {:error, reason} ->
-        Logger.error(state[:name] <>
-          "#{inspect(reason)}, retrying in 10s..."
-        )
+        {:noreply, state}
+    else
+      error ->
+        Logger.error(state[:name] <> " #{inspect(error)}, retrying in 10s...")
 
         Process.sleep(10_000)
 

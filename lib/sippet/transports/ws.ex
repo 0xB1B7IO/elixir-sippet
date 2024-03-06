@@ -8,8 +8,6 @@ defmodule Sippet.Transports.WS do
   @moduledoc """
     This Module implements an RFC7118 transport using Bandit,
     Plug, and WebsockAdapter as a configurable HTTP/WS server.
-    TODO: a transport-local Dynamic Supervisor should spawn client handlers with passed config option
-
     _______________________________________
     Alice    (SIP WSS)    proxy.example.com
     |                            |
@@ -26,31 +24,23 @@ defmodule Sippet.Transports.WS do
     _______________________________________
 
     WS implementation notes:
-
-    o A Client MUST be ready to be challenged with an HTTP 401 challenge [RFC2617]
+    o Clients MUST be ready to be challenged with an HTTP 401 challenge [RFC2617]
       by the Server, a Server SHOULD be able to challenge a given client
-      during the handshake
-
-    o A Client MAY attempt to use TLS on the HTTP leg or the SIP leg of a
-      session, the exact TLS behavior MAY vary accordingly
-
-    o A Client MUST be ready to add an RFC6265 derived session cookie when
-      it connects to a server on the same FQDN as the WS server
-
-    o A Client MUST specify "Sec-WebSocket-Protocol: sip" in it's request headers
-      A Server MUST require the usage said header
-
-    o A Server MUST be ready to read session cookies when present in the
-      handshake and be prepped to detect if it came from a client navigating
-      from the same FQDN as the server
-
-    o A Server MAY decide not to add a "received" parameter to the top-most
+      during the handshake.
+    o Clients MAY attempt to use TLS on the HTTP leg or the SIP leg of a
+      session, the exact TLS behavior MAY vary accordingly.
+    o Clients MUST be ready to add an RFC6265 derived session cookie when
+      it connects to a server on the same FQDN as the WS server.
+    o Clients MUST use "Sec-WebSocket-Protocol: sip" in it's request
+      headers, Servers MUST require this.
+    o Servers MUST be ready to read session cookies when present in the
+      handshake and detect if it came from a client navigating from the
+      same FQDN as the WS server.
+    o Servers MAY decide not to add a "received" parameter to the top-most
       Via header.
-
-    o A Client MAY not have the ability to discover the its local ip address or port
+    o Clients MAY not have the ability to discover the its local ip address or port
       when making a websocket connection, Servers MUST route responses to the
       socket address that initiated the session.
-
   """
 
   use GenServer
@@ -98,11 +88,14 @@ defmodule Sippet.Transports.WS do
                 ":address contains invalid IP or DNS name: #{inspect(reason)}"
       end
 
-    port = Keyword.get(options, :port, 80)
+    port =
+      Keyword.get(options, :port, 80)
 
-    name = :"#{scheme}://#{sippet}@#{address}:#{port}"
+    name =
+      :"#{scheme}://#{sippet}@#{address}:#{port}"
 
-    connection_cache = :ets.new(name, [:set, :public, {:write_concurrency, true}])
+    connection_cache =
+      :ets.new(name, [:named_table, :set, :public, read_concurrency: true, write_concurrency: true])
 
     plug =
       Keyword.get(options, :plug, {

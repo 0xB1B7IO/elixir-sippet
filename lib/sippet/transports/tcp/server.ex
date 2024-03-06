@@ -60,28 +60,26 @@ defmodule Sippet.Transports.TCP.Server do
     end
   end
 
-  @impl GenServer
-  def handle_info({:EXIT, _pid, :normal}, {socket, state}),
-    do: {:noreply, {socket, state}, socket.read_timeout}
-
   @impl ThousandIsland.Handler
   def handle_error(reason, _socket, state) do
-    Logger.error("#{inspect(self())}|#{inspect(reason)}")
-    {:continue, state}
+    Logger.warning("error: #{inspect(reason)}")
+
+    {:close, state}
   end
 
   @impl ThousandIsland.Handler
-  def handle_timeout(_socket, state), do: {:close, state}
+  def handle_timeout(_socket, state),
+    do: {:close, state}
 
   @impl ThousandIsland.Handler
-  def handle_close(_socket, state) do
-    connection_id = state[:connection_id]
+  def handle_close(_socket, state),
+    do: {:shutdown, state}
 
-    :ets.delete(state[:connection_cache], connection_id)
+  @impl ThousandIsland.Handler
+  def handle_shutdown(_socket, state),
+    do: cleanup_connection(state[:connection_cache], state[:connection_id])
 
-    Logger.debug("Peer Disconnection on #{inspect(state[:name])}: #{inspect(state[:peer])}")
-
-    {:shutdown, state}
-  end
+  defp cleanup_connection(connection_cache, connection_id),
+    do: :ets.delete(connection_cache, connection_id)
 
 end
