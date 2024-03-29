@@ -2,7 +2,12 @@ defmodule Sippet.Transports.TCP.Server do
   use ThousandIsland.Handler
 
   alias ThousandIsland.{Socket}
-  alias Sippet.{Router, Message, Transports.TCP}
+  alias Sippet.{
+    Router,
+    Message,
+    Transports.TCP,
+    Transports.TCP.Buffer
+  }
 
   require Logger
 
@@ -22,29 +27,21 @@ defmodule Sippet.Transports.TCP.Server do
     {:continue, state}
   end
 
+  # todo: let implementor choose keepalive behavior
   @impl ThousandIsland.Handler
-  def handle_data({<<22::8, 3::8, minor::8, _::binary>>, _}, _socket, state)
-      when minor in [1,3], do: {:close, state}
-
-  @keep_alive <<13, 10, 13, 10>>
-  @impl ThousandIsland.Handler
-  def handle_data({@keep_alive, _}, _socket, state), do: {:continue, state}
-
-  @exit_code <<255, 244, 255, 253, 6>>
-  @impl ThousandIsland.Handler
-  def handle_data({@exit_code, _}, _socket, state), do: {:close, state}
+  def handle_data("\r\n\r\n", _socket, state),
+    do: {:continue, state}
 
   @impl ThousandIsland.Handler
-  def handle_data(data, _socket, state) do
-    {peer_host, peer_port} = state[:peer]
+  def handle_data(<<255, 244, 255, 253, 6>>, _socket, state),
+    do: {:close, state}
 
-    Router.handle_transport_message(
-      state[:sippet],
-      data,
-      {state[:scheme], peer_host, peer_port}
-    )
+  @impl ThousandIsland.Handler
+  def handle_data(buffer, socket, state) do
+    {ip, port} = state[:peer]
+    from = {state[:protocol], ip, port}
 
-    {:continue, state}
+    read_buffer(buffer, socket, state, from)
   end
 
   @impl GenServer
@@ -52,6 +49,8 @@ defmodule Sippet.Transports.TCP.Server do
     io_msg = Message.to_iodata(msg)
 
     with :ok <- ThousandIsland.Socket.send(socket, io_msg) do
+      Logger.debug("sent:\n#{io_msg}")
+
       {:noreply, {socket, state}}
     else
       err ->
@@ -72,14 +71,35 @@ defmodule Sippet.Transports.TCP.Server do
     do: {:close, state}
 
   @impl ThousandIsland.Handler
-  def handle_close(_socket, state),
-    do: {:shutdown, state}
+  def handle_close(_socket, state) do
+    TCP.clean_up_connection(
+      state[:connection_cache],
+      state[:connection_id]
+    )
+    IO.puts("shutdown #{inspect(state)}")
+    {:shutdown, state}
+  end
 
-  @impl ThousandIsland.Handler
-  def handle_shutdown(_socket, state),
-    do: cleanup_connection(state[:connection_cache], state[:connection_id])
+  defp read_buffer(buffer, socket, state, from) do
+    case Buffer.read(buffer, socket, state[:max_size], state[:timeout]) do
+      {:ok, io_msg, bytes_remaining} ->
+        Router.handle_transport_message(state[:sippet], io_msg, from)
+        read_buffer(bytes_remaining, io_msg, state, from)
 
-  defp cleanup_connection(connection_cache, connection_id),
-    do: :ets.delete(connection_cache, connection_id)
+      {:ok, io_msg} ->
+        Router.handle_transport_message(state[:sippet], io_msg, from)
+        {:continue, state}
+
+      {:error, :missing_content_length} -> {:close, state}
+
+      {:error, :timeout} -> {:close, state}
+
+      {:error, :closed} -> {:close, state}
+
+      {:error, _} = posix_err ->
+        Logger.warning(inspect(posix_err))
+        {:close, state}
+    end
+  end
 
 end

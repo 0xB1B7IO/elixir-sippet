@@ -40,26 +40,38 @@ defmodule Sippet.Transports.TCP do
                   "#{inspect(other)}"
         end
 
-    scheme =
-      Keyword.get(options, :scheme, :tcp)
+    protocol =
+      Keyword.get(options, :protocol, :tcp)
       |> case do
           :tcp -> :tcp
           :tls -> :tls
-          _ -> raise ArgumentError, "#{inspect(__MODULE__)} only supports :tcp and :tls schemes"
+          _ ->
+            raise ArgumentError,
+              "#{inspect(__MODULE__)} only supports :tcp and :tls protocols"
         end
 
     ip =
       case Utils.resolve_name(address, family) do
         {:ok, ip} -> ip
         {:error, reason} ->
-          raise ArgumentError, ":address contains invalid IP or DNS name: #{inspect(reason)}"
+          raise ArgumentError,
+            ":address contains invalid IP or DNS name: #{inspect(reason)}"
       end
 
     port =
       Keyword.get(options, :port, 5060)
 
     name =
-      :"#{scheme}://#{sippet}@#{address}:#{port}"
+      :"#{protocol}://#{sippet}@#{address}:#{port}"
+
+    timeout =
+      Keyword.get(options, :timeout, 10_000)
+
+    max_size =
+      Keyword.get(options, :max_size, 5_000)
+
+    port_range =
+      Keyword.get(options, :port_range, 10_000..20_000)
 
     handler_module =
       Keyword.get(options, :handler_module, Sippet.Transports.TCP.Server)
@@ -69,35 +81,31 @@ defmodule Sippet.Transports.TCP do
         :named_table,
         :set,
         :public,
-        read_concurrency: true,
-        write_concurrency: true
+        read_concurrency: true
       ])
 
     handler_options = [
       sippet: sippet,
       name: name,
-      scheme: scheme,
       connection_cache: connection_cache,
-      ephemeral: true
-    ]
-
-    client_options = [
-      sippet: sippet,
-      connection_cache: connection_cache,
-      port_range: Keyword.get(options, :port_range, 10_000..20_000),
+      protocol: protocol,
+      port_range: port_range,
+      max_size: max_size,
+      timeout: timeout
     ]
 
     {transport_module, transport_options} =
-      case scheme do
+      case protocol do
         :tls ->
           raise "unimplemented"
         :tcp ->
-          {ThousandIsland.Transports.TCP, [ip: ip]}
+          {ThousandIsland.Transports.TCP, [ip: ip, packet: 0]}
       end
 
     thousand_island_options =
       Keyword.get(options, :thousand_island_options, [])
       |> Keyword.put(:port, port)
+      |> Keyword.put(:read_timeout, timeout)
       |> Keyword.put(:transport_module, transport_module)
       |> Keyword.put(:transport_options, transport_options)
       |> Keyword.put(:handler_module, handler_module)
@@ -106,12 +114,12 @@ defmodule Sippet.Transports.TCP do
     options = [
       name: name,
       sippet: sippet,
-      scheme: scheme,
+      protocol: protocol,
       ip: ip,
       port: port,
       family: family,
       connection_cache: connection_cache,
-      client_options: client_options,
+      handler_options: handler_options,
       thousand_island_options: thousand_island_options
     ]
 
@@ -138,7 +146,7 @@ defmodule Sippet.Transports.TCP do
           |> Keyword.put_new(:socket, pid)
           |> Keyword.put(:client_supervisor, client_supervisor)
 
-        Logger.debug("started TCP transport: #{state[:name]}")
+        Logger.debug("started transport: #{state[:name]}")
 
         {:noreply, state}
     else
@@ -180,6 +188,8 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def terminate(reason, state) do
+    IO.inspect reason
+
     :ets.delete(state[:connection_cache])
 
     Process.exit(self(), reason)
@@ -192,5 +202,15 @@ defmodule Sippet.Transports.TCP do
   def close(pid, timeout \\ 15000), do: ThousandIsland.stop(pid, timeout)
 
   def connection_id(ip, port) when is_tuple(ip), do: :erlang.term_to_binary({ip, port})
+
+  def clean_up_connection(connection_cache, connection_id) do
+    try do
+      {:ok, :ets.delete(connection_cache, connection_id)}
+    rescue
+      reason ->
+        {:error, reason} # table was already deleted
+    end
+    :ok
+  end
 
 end

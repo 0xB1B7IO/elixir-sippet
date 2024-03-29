@@ -144,7 +144,7 @@ defmodule Sippet.Transports.WS do
     case Bandit.start_link(state[:bandit_options]) do
       {:ok, _pid} ->
 
-        Logger.debug("starting: "<> inspect(state[:name]))
+        Logger.debug("started transport: #{state[:name]}")
 
         {:noreply, state}
 

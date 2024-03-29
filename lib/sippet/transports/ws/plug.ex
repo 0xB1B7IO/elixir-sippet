@@ -2,8 +2,6 @@ defmodule Sippet.Transports.WS.Plug do
   require Logger
   require Plug
 
-  ## TODO: Add configuration for requiring TLS
-
   # include all options passed in by bandit
   def init(options), do: options
 
