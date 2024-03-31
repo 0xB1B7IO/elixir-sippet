@@ -46,8 +46,7 @@ defmodule Sippet.Transports.TCP do
           :tcp -> :tcp
           :tls -> :tls
           _ ->
-            raise ArgumentError,
-              "#{inspect(__MODULE__)} only supports :tcp and :tls protocols"
+            raise ArgumentError
         end
 
     ip =

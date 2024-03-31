@@ -9,32 +9,38 @@ defmodule Sippet.Transports.TCP.Buffer do
 
   require Logger
 
-  @spec read(bitstring(), any(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, binary()}
-          | {:error, atom()}
-          | {:ok, binary(), binary()}
-  def read(buffer, socket, max_size, timeout) do
+  @spec handle_buffer(bitstring(), any()) :: {:error, atom()} | {:ok, binary()}
+  @spec handle_buffer(bitstring(), any(), non_neg_integer(), non_neg_integer()) :: {:error, atom()} | {:ok, binary()}
+  @spec handle_buffer(bitstring(), any(), non_neg_integer()) :: {:error, atom()} | {:ok, binary()}
+  def handle_buffer(buffer, socket, max_size \\ 5_000, timeout \\ 5_000) do
+    case do_handle_buffer(buffer, socket, max_size, timeout) do
+      {:ok, io_msg, bytes_remaining} -> handle_buffer(bytes_remaining, io_msg, max_size, timeout)
+      {:ok, io_msg} -> {:ok, io_msg}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp do_handle_buffer(buffer, socket, max_size, timeout) do
     if byte_size(buffer) >= max_size do
       {:error, :buffer_overload}
     else
       case String.split(buffer, "\r\n\r\n", parts: 2) do
-        [_headers, <<>>] -> {:ok, buffer}
-
-        [_raw] -> recv(buffer, socket, max_size, timeout)
-
+        [_raw] ->
+          recv(buffer, socket, max_size, timeout)
+        [_headers, <<>>] ->
+          {:ok, buffer}
         [headers, body] ->
           case get_content_length(headers, body) do
-            :done -> {:ok, buffer}
-
-            {:read_body, bytes_to_read} -> recv(buffer, socket, bytes_to_read, timeout)
-
+            :ok ->
+              {:ok, buffer}
+            {:read_body, bytes_to_read} ->
+              recv(buffer, socket, bytes_to_read, timeout)
             {:trim_body, i} ->
               {buffer, remaining} = String.split_at(buffer, i)
               {:ok, buffer, remaining}
-
-            {:error, _} = err -> err
+            {:error, _} = err ->
+              err
           end
-
       end
     end
   end
@@ -53,7 +59,7 @@ defmodule Sippet.Transports.TCP.Buffer do
 
         cond do
           content_length == byte_size(body) ->
-            :done
+            :ok
           content_length > byte_size(body) ->
             {:read_body, (content_length - byte_size(body))}
           content_length < byte_size(body) ->

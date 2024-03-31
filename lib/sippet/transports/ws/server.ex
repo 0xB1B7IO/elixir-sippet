@@ -15,6 +15,7 @@ defmodule Sippet.Transports.WS.Server do
 
   @keep_alive <<13, 10, 13, 10>>
   def handle_in({@keep_alive, _}, state), do: {:noreply, state}
+
   @exit_code <<255, 244, 255, 253, 6>>
   def handle_in({@exit_code, _}, state), do: {:close, state}
 
@@ -27,9 +28,7 @@ defmodule Sippet.Transports.WS.Server do
       :ets.insert(state[:connection_cache], {connection_id, self()})
 
       Router.handle_transport_message(
-        state[:sippet],
-        data,
-        {state[:scheme], peer.address, peer.port}
+        state[:sippet], data, {state[:protocol], peer.address, peer.port}
       )
 
       state =

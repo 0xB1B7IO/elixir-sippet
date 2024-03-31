@@ -8,6 +8,7 @@ defmodule Sippet.Transports.WS do
   @moduledoc """
     This Module implements an RFC7118 transport using Bandit,
     Plug, and WebsockAdapter as a configurable HTTP/WS server.
+
     _______________________________________
     Alice    (SIP WSS)    proxy.example.com
     |                            |
@@ -70,14 +71,13 @@ defmodule Sippet.Transports.WS do
                   "#{inspect(other)}"
         end
 
-    scheme =
-      Keyword.get(options, :scheme, :ws)
+    protocol =
+      Keyword.get(options, :protocol, :ws)
       |> case do
           :ws -> :ws
           :wss -> :wss
           _ ->
-            raise  ArgumentError,
-                   "#{inspect(__MODULE__)} only supports :ws and :wss schemes"
+            raise  ArgumentError
         end
 
     ip =
@@ -91,18 +91,27 @@ defmodule Sippet.Transports.WS do
     port =
       Keyword.get(options, :port, 80)
 
+    port_range =
+      Keyword.get(options, :port_range, 10_000..20_000)
+
     name =
-      :"#{scheme}://#{sippet}@#{address}:#{port}"
+      :"#{protocol}://#{sippet}@#{address}:#{port}"
 
     connection_cache =
-      :ets.new(name, [:named_table, :set, :public, read_concurrency: true, write_concurrency: true])
+      :ets.new(name, [
+          :named_table,
+          :set,
+          :public,
+          read_concurrency: true,
+          write_concurrency: true
+      ])
 
     plug =
       Keyword.get(options, :plug, {
         Sippet.Transports.WS.Plug,
         [
           sippet: sippet,
-          scheme: scheme,
+          protocol: protocol,
           ip: ip,
           port_range: Keyword.get(options, :port_range, 0),
           connection_cache: connection_cache
@@ -110,7 +119,7 @@ defmodule Sippet.Transports.WS do
       })
 
     bandit_options =[
-        scheme: Keyword.get(options, :bandit_scheme, :http),
+        protocol: Keyword.get(options, :bandit_protocol, :http),
         ip: ip,
         port: port,
         plug: plug
@@ -120,10 +129,11 @@ defmodule Sippet.Transports.WS do
       [
         name: name,
         sippet: sippet,
-        scheme: scheme,
+        protocol: protocol,
         ip: ip,
         address: address,
         port: port,
+        port_range: port_range,
         family: family,
         connection_cache: connection_cache,
         bandit_options: bandit_options
@@ -169,7 +179,7 @@ defmodule Sippet.Transports.WS do
           send(handler, {:send_message, msg})
         [] ->
           # add config option for upstream requests
-          Logger.warning("no #{state[:scheme]} handler for #{instance_id}")
+          Logger.warning("no #{state[:protocol]} handler for #{instance_id}")
 
           if key != nil do
             Sippet.Router.receive_transport_error(state[:sippet], key, :no_handler)
