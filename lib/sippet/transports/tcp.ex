@@ -138,22 +138,13 @@ defmodule Sippet.Transports.TCP do
   @impl true
   def handle_continue(state, nil) do
     with {:ok, client_supervisor} <- DynamicSupervisor.start_link(strategy: :one_for_one),
-      {:ok, pid} <- ThousandIsland.start_link(state[:thousand_island_options]) do
-
-        state =
-          state
-          |> Keyword.put_new(:socket, pid)
-          |> Keyword.put(:client_supervisor, client_supervisor)
-
+      {:ok, _pid} <- ThousandIsland.start_link(state[:thousand_island_options]) do
         Logger.debug("started transport: #{state[:name]}")
-
         {:noreply, state}
     else
       error ->
-        Logger.error(state[:name] <> " #{inspect(error)}, retrying in 10s...")
-
-        Process.sleep(10_000)
-
+        Logger.error(state[:name] <> " #{inspect(error)}, retrying...")
+        Process.sleep(state[:timeout])
         {:noreply, nil, {:continue, state}}
     end
   end
@@ -166,15 +157,14 @@ defmodule Sippet.Transports.TCP do
         state
       ) do
     with {:ok, peer_ip} <- Utils.resolve_name(peer_host, state[:family]) do
+
       case :ets.lookup(state[:connection_cache], connection_id(peer_ip, peer_port)) do
         [{_id, handler}] ->
           # found handler, relay message
           send(handler, {:send_message, message})
-
         [] ->
           # TODO: connect to upstream server via config option
           Logger.warning("#{state[:scheme]}: no handler for #{inspect(peer_ip)}:#{peer_port}")
-
           if key != nil do
             Sippet.Router.receive_transport_error(state[:sippet], key, :no_handler)
           end
@@ -187,8 +177,6 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def terminate(reason, state) do
-    IO.inspect reason
-
     :ets.delete(state[:connection_cache])
 
     Process.exit(self(), reason)

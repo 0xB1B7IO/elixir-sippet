@@ -9,10 +9,8 @@ defmodule Sippet.Transports.TCP.Buffer do
 
   require Logger
 
-  @spec handle_buffer(bitstring(), any()) :: {:error, atom()} | {:ok, binary()}
   @spec handle_buffer(bitstring(), any(), non_neg_integer(), non_neg_integer()) :: {:error, atom()} | {:ok, binary()}
-  @spec handle_buffer(bitstring(), any(), non_neg_integer()) :: {:error, atom()} | {:ok, binary()}
-  def handle_buffer(buffer, socket, max_size \\ 5_000, timeout \\ 5_000) do
+  def handle_buffer(buffer, socket, max_size, timeout) do
     case do_handle_buffer(buffer, socket, max_size, timeout) do
       {:ok, io_msg, bytes_remaining} -> handle_buffer(bytes_remaining, io_msg, max_size, timeout)
       {:ok, io_msg} -> {:ok, io_msg}
@@ -25,16 +23,12 @@ defmodule Sippet.Transports.TCP.Buffer do
       {:error, :buffer_overload}
     else
       case String.split(buffer, "\r\n\r\n", parts: 2) do
-        [_raw] ->
-          recv(buffer, socket, max_size, timeout)
-        [_headers, <<>>] ->
-          {:ok, buffer}
+        [_raw] -> recv(buffer, socket, max_size, timeout)
+        [_headers, <<>>] -> {:ok, buffer}
         [headers, body] ->
           case get_content_length(headers, body) do
-            :ok ->
-              {:ok, buffer}
-            {:read_body, bytes_to_read} ->
-              recv(buffer, socket, bytes_to_read, timeout)
+            :ok -> {:ok, buffer}
+            {:read_body, bytes_to_read} -> recv(buffer, socket, bytes_to_read, timeout)
             {:trim_body, i} ->
               {buffer, remaining} = String.split_at(buffer, i)
               {:ok, buffer, remaining}
@@ -56,16 +50,11 @@ defmodule Sippet.Transports.TCP.Buffer do
     with [_, untrimmed] <- String.split(headers, "Content-Length: ", include_captures: true),
       [raw | _rest] <- String.split(untrimmed, "\r\n"),
       content_length <- String.to_integer(raw) do
-
         cond do
-          content_length == byte_size(body) ->
-            :ok
-          content_length > byte_size(body) ->
-            {:read_body, (content_length - byte_size(body))}
-          content_length < byte_size(body) ->
-            {:trim_body, content_length + byte_size(headers)}
+          content_length == byte_size(body) -> :ok
+          content_length > byte_size(body) -> {:read_body, (content_length - byte_size(body))}
+          content_length < byte_size(body) -> {:trim_body, content_length + byte_size(headers)}
         end
-
     else
       _ -> {:error, :missing_content_length}
     end

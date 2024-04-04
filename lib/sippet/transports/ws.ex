@@ -1,10 +1,4 @@
 defmodule Sippet.Transports.WS do
-
-  alias Sippet.{
-    Message,
-    Transports.Utils
-  }
-
   @moduledoc """
     This Module implements an RFC7118 transport using Bandit,
     Plug, and WebsockAdapter as a configurable HTTP/WS server.
@@ -44,6 +38,7 @@ defmodule Sippet.Transports.WS do
       socket address that initiated the session.
   """
 
+  alias Sippet.{Message,Transports.Utils}
   use GenServer
   require Logger
 
@@ -153,17 +148,11 @@ defmodule Sippet.Transports.WS do
   def handle_continue(state, nil) do
     case Bandit.start_link(state[:bandit_options]) do
       {:ok, _pid} ->
-
         Logger.debug("started transport: #{state[:name]}")
-
         {:noreply, state}
-
       _ = reason ->
-
-        Logger.error(state[:name], "#{inspect(reason)}, retrying in 10s...")
-
-        Process.sleep(10_000)
-
+        Logger.error(state[:name], "#{inspect(reason)}, retrying...")
+        Process.sleep(state[:timeout])
         {:noreply, nil, {:continue, state}}
     end
   end
@@ -180,7 +169,6 @@ defmodule Sippet.Transports.WS do
         [] ->
           # add config option for upstream requests
           Logger.warning("no #{state[:protocol]} handler for #{instance_id}")
-
           if key != nil do
             Sippet.Router.receive_transport_error(state[:sippet], key, :no_handler)
           end
@@ -205,12 +193,10 @@ defmodule Sippet.Transports.WS do
         raw_instance_id
         |> String.trim_leading("<")
         |> String.trim_trailing(">")
-
       {:ok, instance_id}
     else
       error ->
         {:error, error}
     end
   end
-
 end
