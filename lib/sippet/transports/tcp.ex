@@ -137,7 +137,8 @@ defmodule Sippet.Transports.TCP do
 
   @impl true
   def handle_continue(state, nil) do
-    with {:ok, client_supervisor} <- DynamicSupervisor.start_link(strategy: :one_for_one),
+    IO.inspect state
+    with {:ok, _client_supervisor} <- DynamicSupervisor.start_link(strategy: :one_for_one),
       {:ok, _pid} <- ThousandIsland.start_link(state[:thousand_island_options]) do
         Logger.debug("started transport: #{state[:name]}")
         {:noreply, state}

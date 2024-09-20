@@ -27,8 +27,10 @@ defmodule Sippet.Transports.TCP.Buffer do
         [_headers, <<>>] -> {:ok, buffer}
         [headers, body] ->
           case get_content_length(headers, body) do
-            :ok -> {:ok, buffer}
-            {:read_body, bytes_to_read} -> recv(buffer, socket, bytes_to_read, timeout)
+            :ok ->
+              {:ok, buffer}
+            {:read_body, bytes_to_read} ->
+              recv(buffer, socket, bytes_to_read, timeout)
             {:trim_body, i} ->
               {buffer, remaining} = String.split_at(buffer, i)
               {:ok, buffer, remaining}

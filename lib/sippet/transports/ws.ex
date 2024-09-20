@@ -113,13 +113,6 @@ defmodule Sippet.Transports.WS do
         ]
       })
 
-    bandit_options =[
-        protocol: Keyword.get(options, :bandit_protocol, :http),
-        ip: ip,
-        port: port,
-        plug: plug
-      ]
-
     options =
       [
         name: name,
@@ -131,7 +124,12 @@ defmodule Sippet.Transports.WS do
         port_range: port_range,
         family: family,
         connection_cache: connection_cache,
-        bandit_options: bandit_options
+        protocol: Keyword.get(options, :bandit_protocol, :http),
+        bandit_options: [
+          ip: ip,
+          port: port,
+          plug: plug
+        ]
       ]
 
     GenServer.start_link(__MODULE__, options)
