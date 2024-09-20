@@ -41,8 +41,8 @@ defmodule Sippet.Mixfile do
       {:sippet_uri, "~> 0.1"},
       {:gen_state_machine, ">= 3.0.0"},
       {:thousand_island, "~> 1.3.5"},
-      {:bandit, "~> 1.4"},
-      {:websock_adapter, "~> 0.5.3"},
+      {:bandit, "~> 1.5.7"},
+      {:websock_adapter, "~> 0.5.7"},
 
       # Build the NIF
       {:elixir_make, "~> 0.7", runtime: false},
