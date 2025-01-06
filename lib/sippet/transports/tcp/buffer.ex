@@ -5,6 +5,8 @@ defmodule Sippet.Transports.TCP.Buffer do
   RFC3261 18.3
   Content-Length header MUST present over
   stream oriented transports to delimit the message
+
+  rudimentary mechanism for delimiting entire messages as they come in from a client
   """
 
   require Logger
@@ -41,13 +43,6 @@ defmodule Sippet.Transports.TCP.Buffer do
     end
   end
 
-  defp recv(buffer, socket, n_bytes, timeout) do
-    case ThousandIsland.Socket.recv(socket, n_bytes, timeout) do
-      {:ok, rest} -> {:ok, buffer<>rest}
-      {:error, _} = error -> error
-    end
-  end
-
   defp get_content_length(headers, body) do
     with [_, untrimmed] <- String.split(headers, "Content-Length: ", include_captures: true),
       [raw | _rest] <- String.split(untrimmed, "\r\n"),
@@ -59,6 +54,13 @@ defmodule Sippet.Transports.TCP.Buffer do
         end
     else
       _ -> {:error, :missing_content_length}
+    end
+  end
+
+  defp recv(buffer, socket, n_bytes, timeout) do
+    case ThousandIsland.Socket.recv(socket, n_bytes, timeout) do
+      {:ok, rest} -> {:ok, buffer<>rest}
+      {:error, _} = error -> error
     end
   end
 
